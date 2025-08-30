@@ -1,0 +1,154 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs and databases
+*.log
+*.sqlite3
+*.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Audio files (generated/temporary)
+output/*.wav
+output/*.mp3
+*.wav
+*.mp3
+
+# Model files (large binaries) 
+*.onnx  # TTS model files are too large for Git
+*.bin
+*.pt
+*.pth
+# *.gguf  # Commented out - need LLM models
+*.safetensors
+
+# LLM and AI model directories
+# llm_models/  # Commented out - needed for RAG assistant
+models/whisper/  # Whisper downloads its own models
+# backup_important_files/llm_models/  # Commented out - needed
+backup_important_files/llm_models/*.gguf  # Ignore large Gemma model files
+backup_important_files/llm_models/gemma-2b-it.Q4_K_M.gguf  # Ignore specific Gemma model
+**/models/**/downloaded_*  # Only ignore downloaded models
+cache/
+
+# Vector stores and embeddings (keep user data)
+# vectorstore_faiss_md/  # Commented out - needed for RAG
+# backup_important_files/vectorstore_faiss_md/  # Commented out - needed
+*.faiss.lock
+temp_*.pkl
+temp_*.pickle
+
+# Piper TTS executables and data (large binaries)
+piper/
+backup_important_files/piper/
+shared/resources/piper/
+*.dll
+*.exe
+espeak-ng-data/
+
+# Generated documentation
+docs/_build/
+
+# Test outputs
+test_outputs/
+test_logs/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Package manager files
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+
+# Cleanup script outputs
+cleanup_old_files.py
+CLEANUP_GUIDE.md
+MANUAL_CLEANUP.md
+
+
+backup_important_files\llm_models

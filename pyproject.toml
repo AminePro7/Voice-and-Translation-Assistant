@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-translation-assistant"
+description = "Modular voice assistant with translation and AI assistance capabilities"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Voice Assistant Team"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9", 
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+requires-python = ">=3.8"
+dynamic = ["version"]
+
+[project.optional-dependencies]
+translation = ["argostranslate>=1.9.0"]
+assistance = [
+    "langchain>=0.1.0",
+    "langchain-community>=0.0.20", 
+    "langchain-huggingface>=0.0.1",
+    "sentence-transformers>=2.2.0",
+    "faiss-cpu>=1.7.4",
+    "llama-cpp-python>=0.2.0"
+]
+all = [
+    "voice-translation-assistant[translation]",
+    "voice-translation-assistant[assistance]"
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0", 
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0"
+]
+
+[project.scripts]
+voice-translator = "services.translation.translation_service:main"
+voice-assistant = "services.assistance.rag_assistant:main"
+
+[tool.setuptools]
+packages = ["shared", "services"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+shared = ["models/**/*", "resources/**/*"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v --cov=shared --cov=services --cov-report=term-missing"

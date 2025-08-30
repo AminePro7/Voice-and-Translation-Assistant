@@ -1,0 +1,29 @@
+# Core shared dependencies for Voice and Translation Assistant
+# Audio processing
+pyaudio>=0.2.11
+soundfile>=0.12.1
+wave
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Speech recognition  
+faster-whisper>=0.10.0
+torch>=2.0.0
+
+# Text-to-speech (Piper TTS requires subprocess, no Python package)
+
+# Common utilities
+pathlib
+tempfile
+threading
+regex
+
+# Optional audio playback
+pygame>=2.1.0
+
+# Platform-specific (Windows only)
+# winsound (built-in on Windows)
+
+# Development and testing
+pytest>=7.0.0
+pytest-cov>=4.0.0

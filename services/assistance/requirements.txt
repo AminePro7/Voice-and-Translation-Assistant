@@ -1,0 +1,16 @@
+# RAG assistance service specific dependencies
+# Extends base requirements.txt
+
+# Langchain ecosystem
+langchain>=0.1.0
+langchain-community>=0.0.20
+langchain-huggingface>=0.0.1
+langchain-core>=0.1.0
+
+# Embeddings and vector store
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.4
+# Note: Use faiss-gpu if CUDA is available
+
+# LLM support
+llama-cpp-python>=0.2.0
