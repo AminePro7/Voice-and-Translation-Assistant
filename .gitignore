@@ -75,6 +75,9 @@ output/*.mp3
 # *.gguf  # Commented out - need LLM models
 *.safetensors
 
+# TTS model directories
+shared/models/tts/
+
 # LLM and AI model directories
 # llm_models/  # Commented out - needed for RAG assistant
 models/whisper/  # Whisper downloads its own models
