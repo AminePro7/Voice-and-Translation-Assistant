@@ -15,7 +15,6 @@ from shared.base.voice_assistant import BaseVoiceAssistant
 try:
     from langchain_community.llms import LlamaCpp
     from langchain.text_splitter import RecursiveCharacterTextSplitter
-    from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_community.vectorstores import FAISS
     from langchain.prompts import (
         ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate,
@@ -27,12 +26,39 @@ try:
     from langchain.memory import ConversationBufferMemory
     from operator import itemgetter
     from langchain.schema import AIMessage, HumanMessage
+    from sentence_transformers import SentenceTransformer
+    import numpy as np
     LANGCHAIN_AVAILABLE = True
 except ImportError as e:
     print(f"ERROR: Langchain libraries are missing ({e}).")
-    print("Install them with: pip install langchain langchain-community langchain-huggingface sentence-transformers faiss-cpu llama-cpp-python")
+    print("Install them with: pip install langchain langchain-community sentence-transformers faiss-cpu llama-cpp-python")
     LANGCHAIN_AVAILABLE = False
     sys.exit(1)
+
+class LocalEmbeddings:
+    """Local embeddings using SentenceTransformers"""
+    
+    def __init__(self, model_name):
+        self.model_name = model_name
+        self.model = None
+    
+    def load_model(self):
+        """Load the embedding model locally"""
+        if self.model is None:
+            self.model = SentenceTransformer(self.model_name)
+        return self.model
+    
+    def embed_documents(self, texts):
+        """Embed a list of documents"""
+        model = self.load_model()
+        embeddings = model.encode(texts)
+        return embeddings.tolist()
+    
+    def embed_query(self, text):
+        """Embed a single query"""
+        model = self.load_model()
+        embedding = model.encode([text])
+        return embedding[0].tolist()
 
 class RAGAssistant(BaseVoiceAssistant):
     """
@@ -41,7 +67,7 @@ class RAGAssistant(BaseVoiceAssistant):
     """
     
     # RAG Configuration
-    EMBEDDING_MODEL_NAME = 'paraphrase-multilingual-MiniLM-L12-v2'
+    EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'  # Smaller, faster local model
     CHUNK_SIZE = 700
     CHUNK_OVERLAP = 70
     SEARCH_K = 3
@@ -123,8 +149,11 @@ class RAGAssistant(BaseVoiceAssistant):
         self.logger.info("Initializing RAG system...")
         
         # Initialize embeddings
-        self.logger.info(f"Loading embedding model: {self.EMBEDDING_MODEL_NAME}")
-        self.embeddings = HuggingFaceEmbeddings(model_name=self.EMBEDDING_MODEL_NAME)
+        self.logger.info(f"Loading local embedding model: {self.EMBEDDING_MODEL_NAME}")
+        self.embeddings = LocalEmbeddings(self.EMBEDDING_MODEL_NAME)
+        # Pre-load the model to avoid delays during runtime
+        self.embeddings.load_model()
+        self.logger.info("Local embedding model loaded successfully")
         
         # Load or create vector store
         self._load_or_create_vectorstore()
@@ -141,8 +170,8 @@ class RAGAssistant(BaseVoiceAssistant):
         # Create RAG chain
         self._create_rag_chain()
         
-        # Set high sensitivity for better voice detection
-        self.set_sensitivity_preset('high')  # Good for normal/quiet speech
+        # Set very high sensitivity for better voice detection
+        self.set_sensitivity_preset('very_high')  # Maximum sensitivity for quiet speech
         
         self.logger.info("RAG system initialized successfully")
     
@@ -189,16 +218,49 @@ class RAGAssistant(BaseVoiceAssistant):
         """Initialize LLM model"""
         self.logger.info(f"Initializing LLM: {self.llm_model_path}")
         
-        self.llm = LlamaCpp(
-            model_path=str(self.llm_model_path),
-            temperature=0.7,
-            max_tokens=512,
-            top_p=1,
-            n_ctx=2048,
-            verbose=False
-        )
+        # Try different configurations until one works
+        configs = [
+            {
+                "n_ctx": 512, 
+                "n_batch": 32,
+                "n_threads": 2,
+                "use_mlock": False,
+                "use_mmap": True
+            },
+            {
+                "n_ctx": 256,
+                "n_batch": 16,
+                "n_threads": 1,
+                "use_mlock": False,
+                "use_mmap": False
+            },
+            {
+                "n_ctx": 128,
+                "n_batch": 8,
+                "n_threads": 1,
+                "use_mlock": False,
+                "use_mmap": True,
+                "low_vram": True
+            }
+        ]
         
-        self.logger.info("LLM initialized successfully")
+        for i, config in enumerate(configs):
+            try:
+                self.logger.info(f"Trying LLM config {i+1}: {config}")
+                self.llm = LlamaCpp(
+                    model_path=str(self.llm_model_path),
+                    temperature=0.7,
+                    max_tokens=256,
+                    top_p=1,
+                    verbose=False,
+                    **config
+                )
+                self.logger.info("LLM initialized successfully")
+                return
+            except Exception as e:
+                self.logger.warning(f"LLM config {i+1} failed: {e}")
+                if i == len(configs) - 1:
+                    raise RuntimeError("All LLM configurations failed") from e
     
     def _create_rag_chain(self):
         """Create RAG processing chain"""
@@ -227,12 +289,26 @@ class RAGAssistant(BaseVoiceAssistant):
         def format_docs(docs):
             return "\n\n".join([doc.page_content for doc in docs])
         
+        def log_and_format_docs(docs):
+            """Log retrieved documents and format them"""
+            if docs:
+                self.logger.info(f"RAG Retrieved {len(docs)} documents:")
+                for i, doc in enumerate(docs, 1):
+                    # Log first 100 characters of each document for reference
+                    content_preview = doc.page_content[:100].replace('\n', ' ').strip()
+                    if len(doc.page_content) > 100:
+                        content_preview += "..."
+                    self.logger.info(f"  Doc {i}: {content_preview}")
+            else:
+                self.logger.info("RAG: No documents retrieved")
+            return format_docs(docs)
+        
         def get_chat_history(memory):
             return memory.chat_memory.messages if hasattr(memory, 'chat_memory') else []
         
         self.rag_chain = (
             {
-                "context": self.retriever | format_docs,
+                "context": self.retriever | log_and_format_docs,
                 "question": RunnablePassthrough(),
                 "chat_history": lambda x: get_chat_history(self.memory)
             }
@@ -293,7 +369,7 @@ class RAGAssistant(BaseVoiceAssistant):
                     print("\nÉcoute... (Parlez maintenant)")
                     print("🎤 Transcription temps réel avec détection intelligente du silence")
                     
-                    # Use real-time transcription with silence detection
+                    # Use real-time transcription with silence detection (same as translation service)
                     transcribed_text = self.transcribe_realtime(
                         language="fr",
                         visual_feedback=True
@@ -301,11 +377,11 @@ class RAGAssistant(BaseVoiceAssistant):
                     
                     if not self.is_text_valid(transcribed_text):
                         no_speech_msg = "Je n'ai pas bien entendu. Pourriez-vous répéter plus clairement s'il vous plaît ?"
-                        print("Aucune parole valide détectée.")
+                        print("No valid speech detected.")
                         self.speak(no_speech_msg, "fr_FR")
                         continue
                     
-                    print(f"Vous avez dit: {transcribed_text}")
+                    print(f"You said: {transcribed_text}")
                     
                     # Check for exit commands
                     if self._is_exit_command(transcribed_text):
