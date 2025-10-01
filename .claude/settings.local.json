@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test_whisper_simple.py:*)",
+      "Bash(python test_whisper_tiny.py:*)",
+      "Bash(python test:*)",
+      "Bash(python:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
