@@ -13,7 +13,7 @@ from shared.base.voice_assistant import BaseVoiceAssistant
 
 # RAG and LLM imports
 try:
-    from langchain_community.llms import LlamaCpp
+    from langchain_ollama import OllamaLLM, OllamaEmbeddings
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import FAISS
     from langchain.prompts import (
@@ -26,39 +26,14 @@ try:
     from langchain.memory import ConversationBufferMemory
     from operator import itemgetter
     from langchain.schema import AIMessage, HumanMessage
-    from sentence_transformers import SentenceTransformer
     import numpy as np
     LANGCHAIN_AVAILABLE = True
 except ImportError as e:
     print(f"ERROR: Langchain libraries are missing ({e}).")
-    print("Install them with: pip install langchain langchain-community sentence-transformers faiss-cpu llama-cpp-python")
+    print("Install them with: pip install langchain langchain-community langchain-ollama faiss-cpu")
     LANGCHAIN_AVAILABLE = False
     sys.exit(1)
 
-class LocalEmbeddings:
-    """Local embeddings using SentenceTransformers"""
-    
-    def __init__(self, model_name):
-        self.model_name = model_name
-        self.model = None
-    
-    def load_model(self):
-        """Load the embedding model locally"""
-        if self.model is None:
-            self.model = SentenceTransformer(self.model_name)
-        return self.model
-    
-    def embed_documents(self, texts):
-        """Embed a list of documents"""
-        model = self.load_model()
-        embeddings = model.encode(texts)
-        return embeddings.tolist()
-    
-    def embed_query(self, text):
-        """Embed a single query"""
-        model = self.load_model()
-        embedding = model.encode([text])
-        return embedding[0].tolist()
 
 class RAGAssistant(BaseVoiceAssistant):
     """
@@ -67,9 +42,9 @@ class RAGAssistant(BaseVoiceAssistant):
     """
     
     # RAG Configuration
-    EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'  # Smaller, faster local model
-    CHUNK_SIZE = 700
-    CHUNK_OVERLAP = 70
+    EMBEDDING_MODEL_NAME = 'embeddinggemma:latest'  # Ollama embedding model
+    CHUNK_SIZE = 300  # Smaller chunks to reduce embedding load
+    CHUNK_OVERLAP = 30
     SEARCH_K = 3
     
     # Pre-defined responses for natural conversation
@@ -99,13 +74,14 @@ class RAGAssistant(BaseVoiceAssistant):
         "au revoir": "Au revoir et bonne journée !"
     }
     
-    def __init__(self, doc_path=None, llm_model_path=None, whisper_model='small'):
+    def __init__(self, doc_path=None, ollama_model="gemma3:1b", embedding_model="embeddinggemma:latest", whisper_model='small'):
         """
         Initialize RAG assistant
         
         Args:
             doc_path: Path to knowledge base document
-            llm_model_path: Path to LLM model file
+            ollama_model: Name of Ollama model to use (default: gemma3:1b)
+            embedding_model: Name of Ollama embedding model (default: embeddinggemma:latest)
             whisper_model: Whisper model size
         """
         # Initialize base voice assistant
@@ -117,11 +93,10 @@ class RAGAssistant(BaseVoiceAssistant):
         # Set up paths (now using backed up files)
         if doc_path is None:
             doc_path = self.paths.root_dir / "backup_important_files" / "doc_resolutions.md"
-        if llm_model_path is None:
-            llm_model_path = self.paths.root_dir / "backup_important_files" / "llm_models" / "gemma-2b-it.Q4_K_M.gguf"
         
         self.doc_path = Path(doc_path)
-        self.llm_model_path = Path(llm_model_path)
+        self.ollama_model = ollama_model
+        self.embedding_model = embedding_model
         self.vectorstore_dir = self.paths.root_dir / "backup_important_files" / "vectorstore_faiss_md"
         
         # Verify essential files
@@ -135,25 +110,28 @@ class RAGAssistant(BaseVoiceAssistant):
     def _verify_files(self):
         """Verify that all required files exist"""
         essential_files = {
-            self.doc_path: "Knowledge base document",
-            self.llm_model_path: "LLM model file"
+            self.doc_path: "Knowledge base document"
         }
         
         for file_path, description in essential_files.items():
             if not file_path.exists():
                 raise FileNotFoundError(f"{description} not found at {file_path}")
             self.logger.info(f"Found {description} at {file_path}")
+        
+        # Log Ollama models being used
+        self.logger.info(f"Using Ollama LLM model: {self.ollama_model}")
+        self.logger.info(f"Using Ollama embedding model: {self.embedding_model}")
     
     def _init_rag_system(self):
         """Initialize RAG system components"""
         self.logger.info("Initializing RAG system...")
         
-        # Initialize embeddings
-        self.logger.info(f"Loading local embedding model: {self.EMBEDDING_MODEL_NAME}")
-        self.embeddings = LocalEmbeddings(self.EMBEDDING_MODEL_NAME)
-        # Pre-load the model to avoid delays during runtime
-        self.embeddings.load_model()
-        self.logger.info("Local embedding model loaded successfully")
+        # Initialize Ollama embeddings
+        self.logger.info(f"Initializing Ollama embedding model: {self.embedding_model}")
+        self.embeddings = OllamaEmbeddings(
+            model=self.embedding_model
+        )
+        self.logger.info("Ollama embedding model initialized successfully")
         
         # Load or create vector store
         self._load_or_create_vectorstore()
@@ -170,8 +148,8 @@ class RAGAssistant(BaseVoiceAssistant):
         # Create RAG chain
         self._create_rag_chain()
         
-        # Set very high sensitivity for better voice detection
-        self.set_sensitivity_preset('very_high')  # Maximum sensitivity for quiet speech
+        # Set ultra-high sensitivity for better voice detection
+        self.set_sensitivity_preset('ultra_sensitive')  # Ultra-maximum sensitivity for very quiet speech
         
         self.logger.info("RAG system initialized successfully")
     
@@ -205,8 +183,30 @@ class RAGAssistant(BaseVoiceAssistant):
         
         self.logger.info(f"Created {len(documents)} document chunks")
         
-        # Create vector store
-        self.vectorstore = FAISS.from_documents(documents, self.embeddings)
+        # Process documents in smaller batches to avoid overwhelming Ollama
+        batch_size = 50  # Process 50 documents at a time
+        self.logger.info(f"Processing documents in batches of {batch_size}")
+        
+        vectorstore = None
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i:i + batch_size]
+            self.logger.info(f"Processing batch {i//batch_size + 1}/{(len(documents) + batch_size - 1)//batch_size} ({len(batch)} documents)")
+            
+            try:
+                if vectorstore is None:
+                    # Create initial vector store with first batch
+                    vectorstore = FAISS.from_documents(batch, self.embeddings)
+                else:
+                    # Add subsequent batches to existing vector store
+                    batch_vectorstore = FAISS.from_documents(batch, self.embeddings)
+                    vectorstore.merge_from(batch_vectorstore)
+                
+                self.logger.info(f"Batch {i//batch_size + 1} processed successfully")
+            except Exception as e:
+                self.logger.error(f"Failed to process batch {i//batch_size + 1}: {e}")
+                raise
+        
+        self.vectorstore = vectorstore
         
         # Save vector store
         self.vectorstore_dir.parent.mkdir(exist_ok=True)
@@ -215,52 +215,21 @@ class RAGAssistant(BaseVoiceAssistant):
         self.logger.info(f"Vector store saved to {self.vectorstore_dir}")
     
     def _init_llm(self):
-        """Initialize LLM model"""
-        self.logger.info(f"Initializing LLM: {self.llm_model_path}")
+        """Initialize Ollama LLM model"""
+        self.logger.info(f"Initializing Ollama LLM: {self.ollama_model}")
         
-        # Try different configurations until one works
-        configs = [
-            {
-                "n_ctx": 512, 
-                "n_batch": 32,
-                "n_threads": 2,
-                "use_mlock": False,
-                "use_mmap": True
-            },
-            {
-                "n_ctx": 256,
-                "n_batch": 16,
-                "n_threads": 1,
-                "use_mlock": False,
-                "use_mmap": False
-            },
-            {
-                "n_ctx": 128,
-                "n_batch": 8,
-                "n_threads": 1,
-                "use_mlock": False,
-                "use_mmap": True,
-                "low_vram": True
-            }
-        ]
-        
-        for i, config in enumerate(configs):
-            try:
-                self.logger.info(f"Trying LLM config {i+1}: {config}")
-                self.llm = LlamaCpp(
-                    model_path=str(self.llm_model_path),
-                    temperature=0.7,
-                    max_tokens=256,
-                    top_p=1,
-                    verbose=False,
-                    **config
-                )
-                self.logger.info("LLM initialized successfully")
-                return
-            except Exception as e:
-                self.logger.warning(f"LLM config {i+1} failed: {e}")
-                if i == len(configs) - 1:
-                    raise RuntimeError("All LLM configurations failed") from e
+        try:
+            self.llm = OllamaLLM(
+                model=self.ollama_model,
+                temperature=0.7,
+                num_predict=256,  # max_tokens equivalent for Ollama
+                top_p=1.0,
+                verbose=False
+            )
+            self.logger.info("Ollama LLM initialized successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize Ollama LLM: {e}")
+            raise RuntimeError(f"Ollama LLM initialization failed: {e}") from e
     
     def _create_rag_chain(self):
         """Create RAG processing chain"""
@@ -432,16 +401,23 @@ def main():
     """Main entry point for RAG assistant service"""
     import argparse
     
-    parser = argparse.ArgumentParser(description='RAG Voice Assistant Service')
+    parser = argparse.ArgumentParser(description='RAG Voice Assistant Service with Ollama')
     parser.add_argument(
         '--doc-path',
         type=str,
         help='Path to knowledge base document'
     )
     parser.add_argument(
-        '--llm-model',
+        '--ollama-model',
         type=str,
-        help='Path to LLM model file'
+        default='gemma3:1b',
+        help='Ollama LLM model name (default: gemma3:1b)'
+    )
+    parser.add_argument(
+        '--embedding-model',
+        type=str,
+        default='embeddinggemma:latest',
+        help='Ollama embedding model name (default: embeddinggemma:latest)'
     )
     parser.add_argument(
         '--whisper-model',
@@ -452,10 +428,18 @@ def main():
     
     args = parser.parse_args()
     
-    print("Initializing RAG Assistant Service...")
+    print("🤖 Initializing RAG Assistant Service with Ollama...")
+    print(f"   - LLM Model: {args.ollama_model}")
+    print(f"   - Embedding Model: {args.embedding_model}")
+    print(f"   - Whisper Model: {args.whisper_model}")
     
     try:
-        with RAGAssistant(args.doc_path, args.llm_model, args.whisper_model) as service:
+        with RAGAssistant(
+            doc_path=args.doc_path,
+            ollama_model=args.ollama_model,
+            embedding_model=args.embedding_model,
+            whisper_model=args.whisper_model
+        ) as service:
             service.run_interactive_session()
     except KeyboardInterrupt:
         print("\nService stopped by user")

@@ -4,6 +4,12 @@ Voice detection sensitivity presets for different environments and voice levels
 
 # Predefined sensitivity configurations
 SENSITIVITY_PRESETS = {
+    'ultra_sensitive': {
+        'threshold': 0.0005,
+        'duration': 1.0,
+        'min_recording': 0.2,
+        'description': 'Ultra-sensitive for very quiet speech without shouting'
+    },
     'very_high': {
         'threshold': 0.002,
         'duration': 1.5,
